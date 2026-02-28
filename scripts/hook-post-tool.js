@@ -15,15 +15,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, basename } from 'path';
+import { join, basename, resolve, dirname } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 
 // Must match namespace logic in server/src/index.ts and search.ts
 function getProjectRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    // --git-common-dir returns the main repo's .git even inside worktrees
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
+    return dirname(resolve(gitCommonDir));
   } catch {
     return process.cwd();
   }

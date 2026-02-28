@@ -3,6 +3,12 @@
  * Smart Memory — SessionStart Hook
  * Injects recent memories for the current project namespace into stdout.
  * Claude Code reads stdout from hooks as additional context.
+ *
+ * Tiered loading strategy:
+ *   1. Decisions & solutions (full content, always loaded)
+ *   2. Context memories (300 char preview)
+ *   3. Recent commits (200 char preview)
+ *   4. Auto-captures (200 char preview, fill remaining slots)
  */
 
 // @ts-expect-error — node:sqlite built-in, not yet in @types/node
@@ -10,15 +16,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, basename } from 'path';
+import { join, basename, resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 
 // Must match namespace logic in server/src/index.ts and search.ts
 function getProjectRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    // --git-common-dir returns the main repo's .git even inside worktrees
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
+    return dirname(resolve(gitCommonDir));
   } catch {
     return process.cwd();
   }
@@ -32,8 +40,18 @@ function getNamespace() {
 
 const NAMESPACE = getNamespace();
 const DB_PATH = join(homedir(), '.smart-memory', NAMESPACE, 'memory.db');
-const MAX_MEMORIES = 8;
-const MAX_CONTENT_LEN = 400;
+
+// ── Tiered loading limits ────────────────────────────────────
+const TIERS = [
+  { label: 'Decisions & Solutions', types: ['decision', 'solution'], limit: 5, maxLen: 600 },
+  { label: 'Context',              types: ['context'],              limit: 3, maxLen: 300 },
+  { label: 'Recent Commits',       types: ['commit'],               limit: 3, maxLen: 200 },
+  { label: 'Auto-captures',        types: ['auto-capture'],         limit: 4, maxLen: 200 },
+];
+
+function truncate(text, maxLen) {
+  return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
+}
 
 function main() {
   if (!existsSync(DB_PATH)) {
@@ -45,32 +63,54 @@ function main() {
     // node:sqlite is built-in (Node >= 22.5) — no WASM, no install needed.
     // readOnly prevents accidental writes from the hook.
     const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    const now = Date.now();
 
-    const rows = db.prepare(
-      'SELECT key, content, type, tags, updated_at FROM memories ' +
-      'WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?) ' +
-      'ORDER BY updated_at DESC LIMIT ?'
-    ).all(NAMESPACE, Date.now(), MAX_MEMORIES);
+    const lines = [];
+    let totalLoaded = 0;
+
+    for (const tier of TIERS) {
+      const placeholders = tier.types.map(() => '?').join(', ');
+      const rows = db.prepare(
+        'SELECT key, content, type, tags, updated_at FROM memories ' +
+        'WHERE namespace = ? AND type IN (' + placeholders + ') ' +
+        'AND (expires_at IS NULL OR expires_at > ?) ' +
+        'ORDER BY updated_at DESC LIMIT ?'
+      ).all(NAMESPACE, ...tier.types, now, tier.limit);
+
+      if (rows.length === 0) continue;
+
+      lines.push('── ' + tier.label + ' ──');
+      for (const row of rows) {
+        const content = String(row.content ?? '');
+        const preview = truncate(content, tier.maxLen);
+        const tags = row.tags ? JSON.parse(String(row.tags)) : [];
+        const tagStr = tags.length > 0 ? ' [' + tags.join(', ') + ']' : '';
+        const date = new Date(Number(row.updated_at)).toLocaleDateString();
+        lines.push('• ' + row.key + tagStr + ' (' + date + ')\n  ' + preview);
+        totalLoaded++;
+      }
+      lines.push('');
+    }
+
+    // Also report embedding coverage so Claude can decide to compact
+    const statsRow = db.prepare(
+      'SELECT COUNT(*) as total, SUM(CASE WHEN embedding_dims > 0 THEN 1 ELSE 0 END) as embedded ' +
+      'FROM memories WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)'
+    ).get(NAMESPACE, now);
 
     db.close();
 
-    if (rows.length === 0) process.exit(0);
+    if (totalLoaded === 0) process.exit(0);
 
-    const count = rows.length;
-    const lines = ['\n[Smart Memory] Loaded ' + count + ' recent memories for project "' + NAMESPACE + '":\n'];
+    const total = Number(statsRow?.total ?? 0);
+    const embedded = Number(statsRow?.embedded ?? 0);
+    const coverage = total > 0 ? Math.round((embedded / total) * 100) : 100;
 
-    for (const row of rows) {
-      const content = String(row.content ?? '');
-      const preview = content.length > MAX_CONTENT_LEN
-        ? content.slice(0, MAX_CONTENT_LEN) + '…'
-        : content;
-      const tags = row.tags ? JSON.parse(String(row.tags)) : [];
-      const tagStr = tags.length > 0 ? ' [' + tags.join(', ') + ']' : '';
-      const date = new Date(Number(row.updated_at)).toLocaleDateString();
-      lines.push('• [' + row.type + tagStr + '] ' + row.key + ' (' + date + ')\n  ' + preview + '\n');
-    }
+    const header = '\n[Smart Memory] ' + totalLoaded + ' memories loaded for "' + NAMESPACE + '"';
+    const stats = '  📊 ' + total + ' total | ' + coverage + '% searchable' +
+      (coverage < 80 ? ' ⚠ run memory_compact to index unembedded memories' : '');
 
-    process.stdout.write(lines.join('\n'));
+    process.stdout.write(header + '\n' + stats + '\n\n' + lines.join('\n'));
   } catch (_err) {
     // Never fail the session — silent degradation
   }

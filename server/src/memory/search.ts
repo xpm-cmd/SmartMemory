@@ -3,7 +3,7 @@
 // ============================================================
 
 import { homedir } from 'os';
-import { join, basename } from 'path';
+import { join, basename, resolve, dirname } from 'path';
 import { existsSync, mkdirSync, renameSync } from 'fs';
 import { randomUUID, createHash } from 'crypto';
 import { execFileSync } from 'child_process';
@@ -30,11 +30,28 @@ function getStorageDir(namespace: string): string {
 
 function getProjectRoot(): string {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    // --git-common-dir returns the main repo's .git even inside worktrees,
+    // so continuations in Claude Code worktrees share the same namespace.
+    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
+    return dirname(resolve(gitCommonDir));
   } catch {
     return process.cwd();
+  }
+}
+
+/** Namespace from the v1.1 --show-toplevel logic (for migration from worktrees) */
+function showToplevelNamespace(): string {
+  try {
+    const toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const name = basename(toplevel) || 'default';
+    const hash = createHash('sha256').update(toplevel).digest('hex').slice(0, 8);
+    return `${name}-${hash}`;
+  } catch {
+    return '';
   }
 }
 
@@ -73,14 +90,22 @@ export class MemorySearch {
 
   async init(): Promise<void> {
     if (this.initialized) return;
-    // Migrate from old cwd-based namespace to git-root-based namespace
+    // Migrate from older namespace schemes to current --git-common-dir-based
     if (!existsSync(this.storageDir)) {
-      const legacy = legacyNamespace();
-      const legacyDir = getStorageDir(legacy);
-      if (legacy !== this.namespace && existsSync(legacyDir)) {
-        renameSync(legacyDir, this.storageDir);
-        process.stderr.write(`[SmartMemory] Migrated namespace "${legacy}" → "${this.namespace}"\n`);
-      } else {
+      // Try v1.1 (--show-toplevel) namespace first, then v1.0 (cwd) namespace
+      const candidates = [showToplevelNamespace(), legacyNamespace()];
+      let migrated = false;
+      for (const old of candidates) {
+        if (!old || old === this.namespace) continue;
+        const oldDir = getStorageDir(old);
+        if (existsSync(oldDir)) {
+          renameSync(oldDir, this.storageDir);
+          process.stderr.write(`[SmartMemory] Migrated namespace "${old}" → "${this.namespace}"\n`);
+          migrated = true;
+          break;
+        }
+      }
+      if (!migrated) {
         mkdirSync(this.storageDir, { recursive: true });
       }
     }
