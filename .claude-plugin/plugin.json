@@ -1,10 +1,10 @@
 {
   "name": "smart-memory",
-  "version": "1.4.0",
-  "description": "Persistent semantic memory with task orchestration for Claude Code. 9 MCP tools, 2 hooks, 1 skill. FTS5 search, dot product similarity, cross-agent export.",
+  "version": "2.0.0",
+  "description": "Persistent semantic memory for Claude Code. 6 MCP tools, 2 hooks, 1 skill. FTS5 + vector hybrid search, cross-agent context export.",
   "author": {
     "name": "AX9"
   },
   "license": "MIT",
-  "keywords": ["memory", "embeddings", "semantic-search", "tasks", "dag", "sqlite", "hooks", "mcp"]
+  "keywords": ["memory", "embeddings", "semantic-search", "sqlite", "hooks", "mcp"]
 }
