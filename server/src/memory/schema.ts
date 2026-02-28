@@ -35,6 +35,26 @@ CREATE INDEX IF NOT EXISTS idx_memories_expires
   ON memories (expires_at)
   WHERE expires_at IS NOT NULL`;
 
+// ── Performance indexes (v1.4) ──────────────────────────────
+// Without these, ORDER BY updated_at DESC does a full table scan.
+
+export const CREATE_NS_UPDATED_INDEX = `
+CREATE INDEX IF NOT EXISTS idx_memories_ns_updated
+  ON memories (namespace, updated_at DESC)`;
+
+export const CREATE_NS_TYPE_UPDATED_INDEX = `
+CREATE INDEX IF NOT EXISTS idx_memories_ns_type_updated
+  ON memories (namespace, type, updated_at DESC)`;
+
+// ── FTS5 full-text search (v1.4) ─────────────────────────────
+// Standalone FTS5 table (not external-content) for simplicity.
+// Kept in sync manually via INSERT/UPDATE/DELETE in search.ts.
+// The `id` column is UNINDEXED so it's stored but not tokenized.
+
+export const CREATE_FTS_TABLE = `
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+  USING fts5(id UNINDEXED, key, content)`;
+
 // ── Tasks table ───────────────────────────────────────────────
 
 export const CREATE_TASKS_TABLE = `
@@ -68,6 +88,11 @@ export function migrate(db: { run: (sql: string) => void }): void {
   db.run(CREATE_NS_INDEX);
   db.run(CREATE_TYPE_INDEX);
   db.run(CREATE_EXPIRES_INDEX);
+  // Performance indexes (v1.4)
+  db.run(CREATE_NS_UPDATED_INDEX);
+  db.run(CREATE_NS_TYPE_UPDATED_INDEX);
+  // Full-text search (v1.4)
+  db.run(CREATE_FTS_TABLE);
   // Task persistence (added for cross-session support)
   db.run(CREATE_TASKS_TABLE);
   db.run(CREATE_TASKS_NS_INDEX);

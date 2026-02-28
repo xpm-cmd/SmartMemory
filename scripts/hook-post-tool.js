@@ -37,11 +37,21 @@ function getNamespace() {
   return name + '-' + hash;
 }
 
-const MIN_LEN = 100;
+const MIN_LEN = 200;       // raised from 100 — skip trivial outputs
 const MAX_CHUNK = 3000;   // max chars per stored chunk
 const MAX_CHUNKS = 5;     // max chunks per output (5 × 3000 = 15K)
 const MAX_TOTAL = 15000;  // hard cap — truncate beyond this
 const AUTO_TTL_MS = 48 * 3_600_000; // 48h expiry for auto-captures
+
+// ── Noise filtering — skip trivial commands with no useful context ──
+const NOISE_COMMANDS = [
+  /^(ls|pwd|echo|cat|wc|which|whoami|date|true|false)\b/,
+  /^cd\s/,
+  /^(npm|yarn|pnpm)\s+(install|ci|i)$/,
+  /^git\s+(status|diff|log|branch|remote|fetch|pull)\b/,
+  /^(node|python|ruby)\s+--version$/,
+  /^(mkdir|touch|chmod|chown)\s/,
+];
 const NAMESPACE = getNamespace();
 const STORAGE_DIR = join(homedir(), '.smart-memory', NAMESPACE);
 const DB_PATH = join(STORAGE_DIR, 'memory.db');
@@ -96,6 +106,9 @@ async function main() {
 
   if (toolName === 'Bash' && toolInput.command) {
     const cmd = String(toolInput.command);
+    // Skip trivial commands — they add noise without useful context
+    if (NOISE_COMMANDS.some(re => re.test(cmd.trim()))) process.exit(0);
+
     if (/^git\s+commit/.test(cmd)) {
       // Extract commit hash from output (e.g. "[main abc1234] message")
       const hashMatch = output.match(/\[[\w/.-]+\s+([0-9a-f]{7,})\]/);
@@ -108,9 +121,11 @@ async function main() {
       key = 'auto:bash:' + cmd.slice(0, 60).replace(/\s+/g, '_');
     }
   } else if (toolName === 'Read' && toolInput.file_path) {
-    // No timestamp: upsert always updates the same key so the memory
-    // stays fresh. Stale content is overwritten on the next read.
-    key = 'auto:read:' + basename(String(toolInput.file_path));
+    // Use last 3 path segments to avoid collisions (e.g. two different index.ts files).
+    // No timestamp: upsert always updates the same key so the memory stays fresh.
+    const fp = String(toolInput.file_path);
+    const segments = fp.split('/').filter(Boolean).slice(-3).join('/');
+    key = 'auto:read:' + segments;
   }
 
   try {

@@ -79,6 +79,9 @@ export class MemorySearch {
   private readonly namespace: string;
   private readonly storageDir: string;
   private initialized = false;
+  private indexDirty = false;           // track if vector index needs saving
+  private lastCleanTime = 0;           // debounce cleanExpired()
+  private static readonly CLEAN_INTERVAL_MS = 60_000; // 60s between cleans
 
   constructor(namespace?: string) {
     this.namespace = namespace ?? defaultNamespace();
@@ -111,6 +114,8 @@ export class MemorySearch {
     }
     await this.db.init();
     this.index.loadFrom(join(this.storageDir, 'index.bin'));
+    // Backfill FTS5 table for existing memories not yet indexed
+    this.backfillFts();
     this.initialized = true;
   }
 
@@ -148,7 +153,12 @@ export class MemorySearch {
          WHERE id = ?`,
         [input.content, type, tags, embedding, dims, now, expiresAt, metadata, existing.id],
       );
+      // Sync FTS
+      this.db.run('DELETE FROM memories_fts WHERE id = ?', [existing.id]);
+      this.db.run('INSERT INTO memories_fts (id, key, content) VALUES (?, ?, ?)',
+        [existing.id, input.key, input.content]);
       this.index.set(existing.id, vec);
+      this.indexDirty = true;
       this.persist();
       return { id: existing.id, action: 'updated' };
     } else {
@@ -162,7 +172,11 @@ export class MemorySearch {
         [id, input.key, input.content, ns, type, tags, embedding, dims,
          now, now, expiresAt, metadata],
       );
+      // Sync FTS
+      this.db.run('INSERT INTO memories_fts (id, key, content) VALUES (?, ?, ?)',
+        [id, input.key, input.content]);
       this.index.set(id, vec);
+      this.indexDirty = true;
       this.persist();
       return { id, action: 'created' };
     }
@@ -185,20 +199,28 @@ export class MemorySearch {
     const { vec } = await this.embeddings.embed(input.query);
     const vectorHits = this.index.search(vec, limit * 2, minSim);
 
-    for (const hit of vectorHits) {
-      const row = this.db.get<DbRow>(
-        'SELECT * FROM memories WHERE id = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)',
-        [hit.id, ns, now],
+    if (vectorHits.length > 0) {
+      // Batch fetch all vector hits in a single query (avoids N+1)
+      const hitIds = vectorHits.map(h => h.id);
+      const placeholders = hitIds.map(() => '?').join(', ');
+      const rows = this.db.all<DbRow>(
+        `SELECT * FROM memories WHERE id IN (${placeholders}) AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)`,
+        [...hitIds, ns, now],
       );
-      if (!row) continue;
-      seenIds.add(row.id);
-      const recency = recencyScore(now, row.updated_at as number);
-      const blended = hit.similarity * 0.6 + recency * 0.2 + keywordScore(input.query, row.content, row.key) * 0.2;
-      candidates.push(rowToResult(row, blended, hit.similarity));
+      const rowMap = new Map(rows.map(r => [r.id, r]));
+
+      for (const hit of vectorHits) {
+        const row = rowMap.get(hit.id);
+        if (!row) continue;
+        seenIds.add(row.id);
+        const recency = recencyScore(now, row.updated_at as number);
+        const blended = hit.similarity * 0.6 + recency * 0.2 + keywordScore(input.query, row.content, row.key) * 0.2;
+        candidates.push(rowToResult(row, blended, hit.similarity));
+      }
     }
 
-    // ── 2. Keyword search (exact match boost) ───────────────
-    // Extract meaningful words (≥ 3 chars) for SQL LIKE matching.
+    // ── 2. Keyword search via FTS5 (fast inverted index) ────
+    // Extract meaningful words (≥ 3 chars) for full-text matching.
     // This catches exact names, paths, and identifiers that vectors miss.
     const keywords = input.query
       .split(/\s+/)
@@ -206,30 +228,58 @@ export class MemorySearch {
       .filter(w => w.length >= 3);
 
     if (keywords.length > 0) {
-      // Build OR conditions: content or key contains any keyword
-      const likeClauses = keywords.map(() => '(content LIKE ? OR key LIKE ?)');
-      const likeParams: unknown[] = [];
-      for (const kw of keywords) {
-        likeParams.push(`%${kw}%`, `%${kw}%`);
-      }
+      // Build FTS5 query: word1 OR word2 OR word3
+      const ftsQuery = keywords.map(kw => `"${kw}"`).join(' OR ');
+      try {
+        // FTS5 returns matching ids; we then join with memories table for namespace/expiry filtering
+        const ftsIds = this.db.all<{ id: string }>(
+          'SELECT id FROM memories_fts WHERE memories_fts MATCH ?',
+          [ftsQuery],
+        );
 
-      const keywordRows = this.db.all<DbRow>(
-        `SELECT * FROM memories WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)
-         AND (${likeClauses.join(' OR ')})
-         ORDER BY updated_at DESC LIMIT ?`,
-        [ns, now, ...likeParams, limit * 2],
-      );
+        if (ftsIds.length > 0) {
+          const matchedIds = ftsIds.map(r => r.id).filter(id => !seenIds.has(id));
+          if (matchedIds.length > 0) {
+            const ph = matchedIds.map(() => '?').join(', ');
+            const keywordRows = this.db.all<DbRow>(
+              `SELECT * FROM memories WHERE id IN (${ph}) AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)
+               ORDER BY updated_at DESC LIMIT ?`,
+              [...matchedIds, ns, now, limit * 2],
+            );
 
-      for (const row of keywordRows) {
-        if (seenIds.has(row.id)) continue; // already scored via vector
-        seenIds.add(row.id);
-        const recency = recencyScore(now, row.updated_at as number);
-        const kwScore = keywordScore(input.query, row.content, row.key);
-        // No vector similarity → use keyword + recency only
-        const blended = kwScore * 0.7 + recency * 0.3;
-        // Only include if keyword relevance is meaningful
-        if (blended >= minSim) {
-          candidates.push(rowToResult(row, blended, 0));
+            for (const row of keywordRows) {
+              seenIds.add(row.id);
+              const recency = recencyScore(now, row.updated_at as number);
+              const kwScore = keywordScore(input.query, row.content, row.key);
+              const blended = kwScore * 0.7 + recency * 0.3;
+              if (blended >= minSim) {
+                candidates.push(rowToResult(row, blended, 0));
+              }
+            }
+          }
+        }
+      } catch {
+        // FTS5 query failed (e.g. special chars) — fall back to LIKE
+        const likeClauses = keywords.map(() => '(content LIKE ? OR key LIKE ?)');
+        const likeParams: unknown[] = [];
+        for (const kw of keywords) {
+          likeParams.push(`%${kw}%`, `%${kw}%`);
+        }
+        const keywordRows = this.db.all<DbRow>(
+          `SELECT * FROM memories WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)
+           AND (${likeClauses.join(' OR ')})
+           ORDER BY updated_at DESC LIMIT ?`,
+          [ns, now, ...likeParams, limit * 2],
+        );
+        for (const row of keywordRows) {
+          if (seenIds.has(row.id)) continue;
+          seenIds.add(row.id);
+          const recency = recencyScore(now, row.updated_at as number);
+          const kwScore = keywordScore(input.query, row.content, row.key);
+          const blended = kwScore * 0.7 + recency * 0.3;
+          if (blended >= minSim) {
+            candidates.push(rowToResult(row, blended, 0));
+          }
         }
       }
     }
@@ -310,20 +360,51 @@ export class MemorySearch {
 
   // ── Internals ─────────────────────────────────────────────
 
+  /** One-time backfill: sync memories into FTS5 table if missing */
+  private backfillFts(): void {
+    try {
+      const ftsCount = (this.db.get<{ n: number }>('SELECT COUNT(*) as n FROM memories_fts') ?? { n: 0 }).n;
+      const memCount = (this.db.get<{ n: number }>('SELECT COUNT(*) as n FROM memories') ?? { n: 0 }).n;
+      if (ftsCount >= memCount) return; // already in sync
+
+      // Insert all memories missing from FTS
+      this.db.run(
+        `INSERT INTO memories_fts (id, key, content)
+         SELECT id, key, content FROM memories
+         WHERE id NOT IN (SELECT id FROM memories_fts)`
+      );
+    } catch {
+      // FTS5 not available or migration pending — skip silently
+    }
+  }
+
+  /** Clean expired memories — debounced to run at most once per 60s */
   private cleanExpired(): void {
     const now = Date.now();
-    // Collect IDs to remove from vector index
+    if (now - this.lastCleanTime < MemorySearch.CLEAN_INTERVAL_MS) return;
+    this.lastCleanTime = now;
+
     const expired = this.db.all<{ id: string }>(
       'SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?',
       [now],
     );
+    if (expired.length === 0) return;
+
     for (const { id } of expired) this.index.delete(id);
     this.db.run('DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?', [now]);
+    // Also clean FTS entries for expired memories
+    const expiredIds = expired.map(e => e.id);
+    const ph = expiredIds.map(() => '?').join(', ');
+    this.db.run(`DELETE FROM memories_fts WHERE id IN (${ph})`, expiredIds);
+    this.indexDirty = true;
   }
 
+  /** Save vector index to disk only if it has changed */
   private persist(): void {
-    this.db.save();
-    this.index.saveTo(join(this.storageDir, 'index.bin'));
+    if (this.indexDirty) {
+      this.index.saveTo(join(this.storageDir, 'index.bin'));
+      this.indexDirty = false;
+    }
   }
 
   // ── Delete ────────────────────────────────────────────────
@@ -338,6 +419,8 @@ export class MemorySearch {
     if (!existing) return { deleted: false };
     this.index.delete(existing.id);
     this.db.run('DELETE FROM memories WHERE id = ?', [existing.id]);
+    this.db.run('DELETE FROM memories_fts WHERE id = ?', [existing.id]);
+    this.indexDirty = true;
     this.persist();
     return { deleted: true };
   }
@@ -395,6 +478,7 @@ export class MemorySearch {
   }
 
   close(): void {
+    this.persist(); // flush dirty index before closing
     this.db.close();
   }
 }

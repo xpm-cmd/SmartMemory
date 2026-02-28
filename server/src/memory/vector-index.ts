@@ -43,15 +43,18 @@ export class VectorIndex {
   }
 
   /**
-   * Return top-k results by cosine similarity.
+   * Return top-k results by similarity.
+   * Uses dot product when vectors are L2-normalized (Transformers.js default),
+   * falling back to full cosine similarity for unnormalized vectors.
    * Skips vectors with different dimensions than the query.
    */
   search(query: Float32Array, topK = 10, minSimilarity = 0): SearchResult[] {
     const results: SearchResult[] = [];
+    const simFn = isNormalized(query) ? dotProduct : cosineSimilarity;
 
     for (const [id, vec] of this.vectors) {
       if (vec.length !== query.length) continue; // dimension mismatch guard
-      const sim = cosineSimilarity(query, vec);
+      const sim = simFn(query, vec);
       if (sim >= minSimilarity) results.push({ id, similarity: sim });
     }
 
@@ -154,6 +157,14 @@ export class VectorIndex {
 
 // ── Math ──────────────────────────────────────────────────────
 
+/** Fast dot product — equivalent to cosine similarity when vectors are L2-normalized */
+function dotProduct(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+}
+
+/** Full cosine similarity — fallback for unnormalized vectors */
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let normA = 0;
@@ -165,4 +176,11 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   }
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
   return denom === 0 ? 0 : dot / denom;
+}
+
+/** Check if a vector is L2-normalized (norm ≈ 1.0 within tolerance) */
+function isNormalized(v: Float32Array, tolerance = 0.01): boolean {
+  let norm = 0;
+  for (let i = 0; i < v.length; i++) norm += v[i] * v[i];
+  return Math.abs(norm - 1.0) < tolerance;
 }
