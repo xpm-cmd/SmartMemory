@@ -13,15 +13,25 @@
 // @ts-expect-error — node:sqlite built-in, not yet in @types/node
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, basename } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 
 // Must match namespace logic in server/src/index.ts and search.ts
+function getProjectRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
 function getNamespace() {
-  const cwd = process.cwd();
-  const name = basename(cwd) || 'default';
-  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 8);
+  const root = getProjectRoot();
+  const name = basename(root) || 'default';
+  const hash = createHash('sha256').update(root).digest('hex').slice(0, 8);
   return name + '-' + hash;
 }
 
@@ -29,6 +39,7 @@ const MIN_LEN = 100;
 const MAX_CHUNK = 3000;   // max chars per stored chunk
 const MAX_CHUNKS = 5;     // max chunks per output (5 × 3000 = 15K)
 const MAX_TOTAL = 15000;  // hard cap — truncate beyond this
+const AUTO_TTL_MS = 48 * 3_600_000; // 48h expiry for auto-captures
 const NAMESPACE = getNamespace();
 const STORAGE_DIR = join(homedir(), '.smart-memory', NAMESPACE);
 const DB_PATH = join(STORAGE_DIR, 'memory.db');
@@ -74,11 +85,26 @@ async function main() {
 
   if (!output || output.length < MIN_LEN) process.exit(0);
 
-  // Determine a key for this memory
+  // Determine a key, type, and tags for this memory
   const toolInput = hookData?.tool_input ?? {};
   let key = 'auto:' + toolName + ':' + Date.now();
+  let memType = 'auto-capture';
+  let memTags = [toolName.toLowerCase(), 'auto'];
+  let isGitCommit = false;
+
   if (toolName === 'Bash' && toolInput.command) {
-    key = 'auto:bash:' + String(toolInput.command).slice(0, 60).replace(/\s+/g, '_');
+    const cmd = String(toolInput.command);
+    if (/^git\s+commit/.test(cmd)) {
+      // Extract commit hash from output (e.g. "[main abc1234] message")
+      const hashMatch = output.match(/\[[\w/.-]+\s+([0-9a-f]{7,})\]/);
+      const shortHash = hashMatch ? hashMatch[1].slice(0, 7) : Date.now().toString(36);
+      key = 'auto:git:commit:' + shortHash;
+      memType = 'commit';
+      memTags = ['git', 'commit', 'auto'];
+      isGitCommit = true;
+    } else {
+      key = 'auto:bash:' + cmd.slice(0, 60).replace(/\s+/g, '_');
+    }
   } else if (toolName === 'Read' && toolInput.file_path) {
     // No timestamp: upsert always updates the same key so the memory
     // stays fresh. Stale content is overwritten on the next read.
@@ -109,18 +135,20 @@ async function main() {
     ).run();
 
     const now = Date.now();
-    const type = 'auto-capture';
-    const tags = JSON.stringify([toolName.toLowerCase(), 'auto']);
+    const type = memType;
+    const tags = JSON.stringify(memTags);
     const baseCmd = toolInput.command ?? toolInput.file_path ?? '';
 
     // Truncate extremely long outputs before chunking
     const content = output.length > MAX_TOTAL ? output.slice(0, MAX_TOTAL) : output;
 
+    // Git commits are permanent history — no TTL. Auto-captures expire in 48h.
+    const expiresAt = isGitCommit ? null : now + AUTO_TTL_MS;
     const upsertSql =
-      'INSERT INTO memories (id, key, content, namespace, type, tags, embedding_dims, created_at, updated_at, metadata) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?) ' +
+      'INSERT INTO memories (id, key, content, namespace, type, tags, embedding_dims, created_at, updated_at, expires_at, metadata) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) ' +
       'ON CONFLICT(key, namespace) DO UPDATE SET ' +
-      'content = excluded.content, updated_at = excluded.updated_at, metadata = excluded.metadata';
+      'content = excluded.content, updated_at = excluded.updated_at, expires_at = excluded.expires_at, metadata = excluded.metadata';
 
     if (content.length <= MAX_CHUNK) {
       // ── Small output → single memory ──────────────────────
@@ -129,7 +157,7 @@ async function main() {
       db.prepare('DELETE FROM memories WHERE key LIKE ? AND namespace = ?')
         .run(key + ':chunk:%', NAMESPACE);
       db.prepare(upsertSql)
-        .run(randomUUID(), key, content, NAMESPACE, type, tags, now, now, meta);
+        .run(randomUUID(), key, content, NAMESPACE, type, tags, now, now, expiresAt, meta);
     } else {
       // ── Large output → chunk by line boundaries ───────────
       const parts = chunkByLines(content, MAX_CHUNK, MAX_CHUNKS);
@@ -149,7 +177,7 @@ async function main() {
             chunk: i, totalChunks: parts.length,
           });
           db.prepare(upsertSql)
-            .run(randomUUID(), chunkKey, parts[i], NAMESPACE, type, tags, now, now, meta);
+            .run(randomUUID(), chunkKey, parts[i], NAMESPACE, type, tags, now, now, expiresAt, meta);
         }
         db.prepare('COMMIT').run();
       } catch (txErr) {

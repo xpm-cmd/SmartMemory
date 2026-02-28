@@ -8,15 +8,25 @@
 // @ts-expect-error — node:sqlite built-in, not yet in @types/node
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, basename } from 'path';
 import { existsSync } from 'fs';
 
 // Must match namespace logic in server/src/index.ts and search.ts
+function getProjectRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
 function getNamespace() {
-  const cwd = process.cwd();
-  const name = basename(cwd) || 'default';
-  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 8);
+  const root = getProjectRoot();
+  const name = basename(root) || 'default';
+  const hash = createHash('sha256').update(root).digest('hex').slice(0, 8);
   return name + '-' + hash;
 }
 

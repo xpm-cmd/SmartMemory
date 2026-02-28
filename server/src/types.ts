@@ -57,7 +57,8 @@ export interface MemorySearchResult {
   namespace: string;
   type: string;
   tags: string[];
-  similarity: number;
+  similarity: number;       // blended score (cosine * 0.7 + recency * 0.3)
+  raw_similarity: number;   // pure cosine similarity
   created_at: number;
   updated_at: number;
 }

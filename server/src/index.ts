@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Smart Memory MCP Server
- * 8 tools: memory_store, memory_search, memory_query, memory_stats, memory_delete,
- *          task_plan, task_next, task_update
+ * 9 tools: memory_store, memory_search, memory_query, memory_stats, memory_delete,
+ *          memory_compact, task_plan, task_next, task_update
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -21,6 +21,7 @@ import { homedir } from 'os';
 import { join, basename } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import type {
   MemoryStoreInput,
   MemorySearchInput,
@@ -31,10 +32,20 @@ import type {
   TaskUpdateInput,
 } from './types.js';
 
+function getProjectRoot(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
 function getNamespace(): string {
-  const cwd = process.cwd();
-  const name = basename(cwd) || 'default';
-  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 8);
+  const root = getProjectRoot();
+  const name = basename(root) || 'default';
+  const hash = createHash('sha256').update(root).digest('hex').slice(0, 8);
   return `${name}-${hash}`;
 }
 
@@ -134,6 +145,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'memory_compact',
+      description: 'Maintenance: clean expired memories, generate embeddings for auto-captured content (embedding_dims=0). Makes hook-captured memories searchable via memory_search.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          namespace: { type: 'string', description: 'Namespace to compact (defaults to current project)' },
+        },
+      },
+    },
+    {
       name: 'task_plan',
       description: 'Create a DAG of tasks with dependencies. Validates, detects cycles, returns topological order.',
       inputSchema: {
@@ -200,7 +221,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const input = args as unknown as MemorySearchInput;
         if (!input.query?.trim()) throw new Error('query is required');
         const results = await memorySearch.search(input);
-        return { content: [{ type: 'text', text: JSON.stringify({ count: results.length, results: results.map(r => ({ key: r.key, content: r.content, similarity: Math.round(r.similarity * 1000) / 1000, type: r.type, tags: r.tags, namespace: r.namespace, updated_at: new Date(r.updated_at).toISOString() })) }, null, 2) }] };
+        return { content: [{ type: 'text', text: JSON.stringify({ count: results.length, results: results.map(r => ({ key: r.key, content: r.content, similarity: Math.round(r.similarity * 1000) / 1000, raw_similarity: Math.round(r.raw_similarity * 1000) / 1000, type: r.type, tags: r.tags, namespace: r.namespace, updated_at: new Date(r.updated_at).toISOString() })) }, null, 2) }] };
       }
       case 'memory_query': {
         const input = args as unknown as MemoryQueryInput;
@@ -216,6 +237,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!input.key?.trim()) throw new Error('key is required');
         const result = await memorySearch.delete(input.key, input.namespace);
         return { content: [{ type: 'text', text: JSON.stringify({ success: true, deleted: result.deleted, key: input.key }, null, 2) }] };
+      }
+      case 'memory_compact': {
+        const ns = (args as { namespace?: string }).namespace;
+        const result = await memorySearch.compact(ns);
+        return { content: [{ type: 'text', text: JSON.stringify({ success: true, ...result, message: `Compacted: ${result.embedded} embeddings generated, ${result.expired_cleaned} expired cleaned, ${result.total_after} total remaining` }, null, 2) }] };
       }
       case 'task_plan': {
         const input = args as unknown as TaskPlanInput;
