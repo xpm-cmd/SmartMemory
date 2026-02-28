@@ -1,7 +1,7 @@
 {
   "name": "smart-memory",
-  "version": "1.3.0",
-  "description": "Persistent semantic memory with task orchestration for Claude Code. 9 MCP tools, 2 hooks, 1 skill. Includes /memory-manage skill for Sonnet-delegated memory operations.",
+  "version": "1.4.0",
+  "description": "Persistent semantic memory with task orchestration for Claude Code. 9 MCP tools, 2 hooks, 1 skill. FTS5 search, dot product similarity, cross-agent export.",
   "author": {
     "name": "AX9"
   },
