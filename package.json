@@ -1,0 +1,9 @@
+{
+  "name": "smart-memory",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd server && npm run build",
+    "test": "cd server && npm test"
+  }
+}

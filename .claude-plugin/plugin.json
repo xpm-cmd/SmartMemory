@@ -1,0 +1,10 @@
+{
+  "name": "smart-memory",
+  "version": "1.0.0",
+  "description": "Semantic memory and task orchestration for Claude Code. Store content with embeddings, search by similarity, plan tasks as DAGs with dependency resolution. 6 MCP tools + 2 hooks.",
+  "author": {
+    "name": "AX9"
+  },
+  "license": "MIT",
+  "keywords": ["memory", "embeddings", "semantic-search", "tasks", "dag", "sqlite", "hooks", "mcp"]
+}

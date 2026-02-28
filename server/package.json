@@ -1,0 +1,30 @@
+{
+  "name": "smart-memory-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server for semantic memory and task orchestration in Claude Code",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "smart-memory": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@huggingface/transformers": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18"
+  }
+}
