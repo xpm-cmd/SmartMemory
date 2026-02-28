@@ -80,7 +80,9 @@ async function main() {
   if (toolName === 'Bash' && toolInput.command) {
     key = 'auto:bash:' + String(toolInput.command).slice(0, 60).replace(/\s+/g, '_');
   } else if (toolName === 'Read' && toolInput.file_path) {
-    key = 'auto:read:' + basename(String(toolInput.file_path)) + ':' + Date.now();
+    // No timestamp: upsert always updates the same key so the memory
+    // stays fresh. Stale content is overwritten on the next read.
+    key = 'auto:read:' + basename(String(toolInput.file_path));
   }
 
   try {
