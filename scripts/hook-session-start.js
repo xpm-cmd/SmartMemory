@@ -17,6 +17,10 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { getNamespace, exportContextMd } from './lib/export-context.js';
+import { syncClaudeMd } from './lib/claudemd-sync.js';
+
+// ── Ensure CLAUDE.md has Smart Memory instructions ──
+syncClaudeMd();
 
 const NAMESPACE = getNamespace();
 const DB_PATH = join(homedir(), '.smart-memory', NAMESPACE, 'memory.db');
