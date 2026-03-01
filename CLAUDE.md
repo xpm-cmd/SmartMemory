@@ -1,52 +1,47 @@
-# Smart Memory — Project Guide
+# Smart Memory — Development Guide
 
-## Smart Memory is active in this project
+## Project overview
 
-MCP tools available: `memory_store`, `memory_search`, `memory_query`,
-`memory_stats`, `memory_delete`, `task_plan`, `task_next`, `task_update`
+Smart Memory is a Claude Code plugin that provides persistent semantic memory across sessions. It consists of an MCP server (6 tools), two hooks (SessionStart + PostToolUse), and a Sonnet-delegation skill.
 
----
+## Architecture
 
-## Rules for using Smart Memory
+- **MCP Server**: `server/src/index.ts` — routes tool calls to `memory/search.ts`
+- **Search Engine**: `server/src/memory/search.ts` — hybrid FTS5 + vector search, store, compact
+- **Database**: `server/src/memory/database.ts` — node:sqlite with WAL mode
+- **Embeddings**: `server/src/memory/embeddings.ts` — Transformers.js (local, no API)
+- **Vector Index**: `server/src/memory/vector-index.ts` — brute-force dot product
+- **SessionStart Hook**: `scripts/hook-session-start.js` — loads context + exports AGENT-MEMORY-CONTEXT.md
+- **PostToolUse Hook**: `scripts/hook-post-tool.js` — auto-captures Bash/Read output, promotes errors
 
-### At the START of every session
+## Key conventions
 
-1. Run `memory_search query="[what the user is asking about]"` before
-   exploring files or writing code. If similarity > 0.6, use that context.
-2. Run `memory_query type="decision" limit=10` to load architecture decisions.
+- TypeScript strict mode, ESM modules throughout
+- Version source of truth: `.claude-plugin/plugin.json` (read dynamically by server + hooks)
+- Tests: Vitest for server (`cd server && npm test`), node:test for hooks (`node --test scripts/tests/hook-patterns.test.js`)
+- Node >= 22.5 required (uses built-in `node:sqlite`)
+- Hooks are plain JS (no build step), server is TypeScript
 
-### STORE after important events
+## Memory types
 
-| Event | Command |
-|---|---|
-| Architecture or design decision | `memory_store key="decision:[topic]" content="..." type="decision"` |
-| Bug fix with non-obvious solution | `memory_store key="solution:[bug]" content="..." type="solution"` |
-| User explains domain context | `memory_store key="context:[topic]" content="..." type="context"` |
-| Recurring pattern found | `memory_store key="pattern:[name]" content="..." type="pattern"` |
+| Type | Purpose | Stored by |
+|---|---|---|
+| `decision` | Architecture choices and reasoning | Claude (manual) |
+| `solution` | Bug fixes, root causes, workarounds | Claude (manual) |
+| `context` | Domain knowledge, how things work | Claude (manual) |
+| `pattern` | Recurring patterns and conventions | Claude (manual) |
+| `auto-capture` | Bash/Read output | PostToolUse hook (auto) |
 
-> Auto-capture is ON: Bash and Read outputs ≥ 100 chars are saved automatically.
-> You do NOT need to manually store file contents or command outputs.
+## Auto-capture behavior
 
-### WHEN to re-read a file instead of trusting memory
+- PostToolUse captures Bash/Read output >= 200 chars
+- Noise filtered: `ls`, `pwd`, `git status`, `npm install`, etc. are skipped
+- TTL: 48h for regular auto-captures, permanent for errors and git commits
+- Error detection: 3 tiers (typed exceptions > stack traces > exit codes)
+- Errors and build results are auto-promoted to permanent (no TTL)
 
-- Always before editing (Edit tool requires a fresh Read)
-- When you modified the file in this session
-- When the memory type is `auto-capture` and the task requires exact current content
+## Cross-agent export
 
-### WHEN memory is reliable without re-reading
-
-- `type="decision"` — architectural choices written consciously
-- `type="solution"` — resolved bugs and workarounds
-- `type="context"` — domain knowledge explained by the user
-
----
-
-## Task planning
-
-For multi-step work, use the task system:
-```
-task_plan tasks=[{id, title, priority, dependencies[]}]
-task_next   → returns the next available task respecting dependencies
-task_update id="..." status="in_progress|completed|blocked"
-```
-Tasks persist across sessions — a plan started today continues tomorrow.
+`AGENT-MEMORY-CONTEXT.md` is generated at project root with per-type limits:
+- decision: 20, solution: 20, context: 10, pattern: 10 (max ~60 entries)
+- Regenerated on SessionStart and after each git commit
