@@ -1,6 +1,6 @@
 {
   "name": "smart-memory",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Persistent semantic memory for Claude Code. 6 MCP tools, 2 hooks, 1 skill. FTS5 + vector hybrid search, cross-agent context export.",
   "author": {
     "name": "xpm-cmd"

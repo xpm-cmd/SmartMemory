@@ -25,6 +25,17 @@ ${VERSION_MARKER}${CURRENT_VERSION} -->
 
 6 tools: \`memory_store\`, \`memory_search\`, \`memory_query\`, \`memory_stats\`, \`memory_delete\`, \`memory_compact\`
 
+### Search before acting
+
+Before exploring files or writing code, check if Smart Memory already has context:
+1. \`memory_search query="[what the user is asking about]"\` — find relevant memories
+2. Use loaded memories from session start (shown above) as starting context
+
+Do this especially when:
+- Starting a new task or answering a question about the project
+- The user references something from a previous session
+- You're unsure about architecture, patterns, or past decisions
+
 ### Store proactively during work
 
 Save understanding as you go — don't wait for a commit. Compaction erases reasoning.
@@ -41,6 +52,9 @@ memory_store key="pattern:[name]"    type="pattern"    # recurring patterns disc
 - Choose between approaches (store the choice AND the reasoning)
 - Find a root cause or non-obvious fix
 - Discover a codebase pattern or convention
+- Investigate and understand how something works (after reading files, docs, or exploring code)
+- Read multiple files and connect the dots about a system's behavior
+- Gain understanding through research that would be lost after compaction
 
 Bash/Read outputs ≥ 200 chars are auto-saved (48h TTL). Errors and test results are auto-promoted to permanent.
 
