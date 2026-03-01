@@ -12,30 +12,11 @@
 
 // @ts-expect-error — node:sqlite built-in, not yet in @types/node
 import { DatabaseSync } from 'node:sqlite';
-import { createHash, randomUUID } from 'crypto';
-import { execFileSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { homedir } from 'os';
-import { join, basename, resolve, dirname } from 'path';
+import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-
-// Must match namespace logic in server/src/index.ts and search.ts
-function getProjectRoot() {
-  try {
-    // --git-common-dir returns the main repo's .git even inside worktrees
-    const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    return dirname(resolve(gitCommonDir));
-  } catch {
-    return process.cwd();
-  }
-}
-function getNamespace() {
-  const root = getProjectRoot();
-  const name = basename(root) || 'default';
-  const hash = createHash('sha256').update(root).digest('hex').slice(0, 8);
-  return name + '-' + hash;
-}
+import { getNamespace, exportContextMd } from './lib/export-context.js';
 
 const MIN_LEN = 200;       // raised from 100 — skip trivial outputs
 const MAX_CHUNK = 3000;   // max chars per stored chunk
@@ -201,6 +182,11 @@ async function main() {
         db.prepare('ROLLBACK').run();
         throw txErr;
       }
+    }
+
+    // Regenerate CONTEXT.md after commits so Codex/Gemini stay up-to-date
+    if (isGitCommit) {
+      exportContextMd(db, NAMESPACE, now);
     }
 
     db.close();
