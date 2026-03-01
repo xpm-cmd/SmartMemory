@@ -3,7 +3,7 @@
   "name": "smart-memory-local",
   "description": "Smart Memory — persistent semantic memory for Claude Code",
   "owner": {
-    "name": "AX9"
+    "name": "xpm-cmd"
   },
   "plugins": [
     {
@@ -11,7 +11,7 @@
       "description": "Persistent semantic memory for Claude Code. 6 MCP tools, 2 hooks, 1 skill. FTS5 + vector hybrid search, cross-agent context export.",
       "version": "2.1.0",
       "author": {
-        "name": "AX9"
+        "name": "xpm-cmd"
       },
       "source": "./",
       "category": "development"

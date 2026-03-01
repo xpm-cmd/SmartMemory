@@ -3,7 +3,7 @@
   "version": "2.1.0",
   "description": "Persistent semantic memory for Claude Code. 6 MCP tools, 2 hooks, 1 skill. FTS5 + vector hybrid search, cross-agent context export.",
   "author": {
-    "name": "AX9"
+    "name": "xpm-cmd"
   },
   "license": "MIT",
   "keywords": ["memory", "embeddings", "semantic-search", "sqlite", "hooks", "mcp"]

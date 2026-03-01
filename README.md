@@ -180,6 +180,10 @@ rm -rf ~/.smart-memory
 
 The CLAUDE.md section can be removed manually — look for `## Smart Memory` through `<!-- /SMART_MEMORY -->`.
 
+## Author
+
+Built by [xpm-cmd](https://github.com/xpm-cmd) with [Claude Code](https://claude.com/claude-code) as co-author.
+
 ## License
 
 MIT
