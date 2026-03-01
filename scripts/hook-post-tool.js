@@ -87,7 +87,13 @@ async function main() {
   let isHighValue = false; // survives compaction (no TTL)
 
   // ── Patterns that indicate high-value output (errors, test results) ──
-  const ERROR_PATTERNS = /\b(FAIL|FAILED|Error:|TypeError:|SyntaxError|ReferenceError|BUILD FAILED|error TS\d|AssertionError|panic:|FATAL)\b/;
+  // Strict errors: typed exceptions + stack traces + exit codes (low false-positive rate)
+  const STRICT_ERROR_PATTERNS = /\b(TypeError|SyntaxError|ReferenceError|AssertionError|RangeError|URIError):/;
+  const STACK_TRACE = /\n\s+at\s+/;                     // Node/JS stack traces
+  const EXIT_ERROR = /\b(exit(ed)?\s+(with\s+)?(code|status)\s+[1-9]|error TS\d{4}|FATAL)\b|npm ERR!|panic:/;
+  // Build/test runners — errors here are always meaningful
+  const TEST_BUILD_CMD = /^(npm\s+(test|run\s+(build|test|lint|check))|npx\s+(jest|vitest|mocha|tsc)|pytest|cargo\s+(test|build|check)|go\s+(test|build)|make|bun\s+(test|build)|pnpm\s+(test|run\s+(build|test))|yarn\s+(test|build))\b/;
+  const TEST_FAILURE = /\b(FAIL|FAILED|failures?:\s*[1-9])\b/i;
   const SUCCESS_PATTERNS = /\b(passed|✓|Tests?:\s*\d+\s*passed|BUILD SUCCESS|Successfully compiled)\b/i;
 
   if (toolName === 'Bash' && toolInput.command) {
@@ -103,13 +109,19 @@ async function main() {
       memType = 'commit';
       memTags = ['git', 'commit', 'auto'];
       isGitCommit = true;
-    } else if (ERROR_PATTERNS.test(output)) {
-      // Test failures and build errors — critical for debugging after compaction
+    } else if (STRICT_ERROR_PATTERNS.test(output) || STACK_TRACE.test(output) || EXIT_ERROR.test(output)) {
+      // Typed exceptions, stack traces, or exit errors — always high-value
       key = 'auto:error:' + cmd.slice(0, 50).replace(/\s+/g, '_');
       memType = 'error';
       memTags = ['error', 'auto'];
       isHighValue = true;
-    } else if (/^(npm\s+test|npm\s+run\s+(build|test)|npx\s+jest|pytest|cargo\s+test|go\s+test)/.test(cmd) && SUCCESS_PATTERNS.test(output)) {
+    } else if (TEST_BUILD_CMD.test(cmd) && TEST_FAILURE.test(output)) {
+      // Test/build command with failure output — high-value
+      key = 'auto:error:' + cmd.slice(0, 50).replace(/\s+/g, '_');
+      memType = 'error';
+      memTags = ['error', 'test', 'auto'];
+      isHighValue = true;
+    } else if (TEST_BUILD_CMD.test(cmd) && SUCCESS_PATTERNS.test(output)) {
       // Successful test/build — confirms working state
       key = 'auto:build:' + cmd.slice(0, 50).replace(/\s+/g, '_');
       memType = 'context';

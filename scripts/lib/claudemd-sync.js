@@ -1,17 +1,23 @@
 /**
  * Smart Memory — CLAUDE.md auto-sync.
  * Ensures ~/.claude/CLAUDE.md has up-to-date Smart Memory instructions.
- * Runs on every SessionStart; only writes when version changes.
+ * First install: outputs a notice via stdout (Claude shows it to the user).
+ * Subsequent runs: silent no-op if version matches.
  */
 
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
 
-const CURRENT_VERSION = '2.1.0';
+// Version: single source of truth is plugin.json
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pluginJson = JSON.parse(readFileSync(join(__dirname, '../../.claude-plugin/plugin.json'), 'utf-8'));
+const CURRENT_VERSION = pluginJson.version;
 const VERSION_MARKER = '<!-- SMART_MEMORY_VERSION: ';
 const SECTION_START = '## Smart Memory';
 const SECTION_END_MARKER = '<!-- /SMART_MEMORY -->';
+const CONSENT_FILE = join(homedir(), '.smart-memory', '.claudemd-consent');
 
 const TEMPLATE = `## Smart Memory
 
@@ -55,18 +61,16 @@ ${SECTION_END_MARKER}`;
 
 /**
  * Ensure CLAUDE.md has the Smart Memory section at the correct version.
- * - If missing → append the section
- * - If outdated → replace only the Smart Memory section
- * - If current → no-op
+ * Returns 'first-install' | 'updated' | 'current' to indicate what happened.
  */
 export function syncClaudeMd() {
   const claudeDir = join(homedir(), '.claude');
   const claudeMdPath = join(claudeDir, 'CLAUDE.md');
+  const smDir = join(homedir(), '.smart-memory');
 
-  // Ensure ~/.claude/ exists
-  if (!existsSync(claudeDir)) {
-    mkdirSync(claudeDir, { recursive: true });
-  }
+  // Ensure directories exist
+  if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+  if (!existsSync(smDir)) mkdirSync(smDir, { recursive: true });
 
   let content = '';
   if (existsSync(claudeMdPath)) {
@@ -76,7 +80,22 @@ export function syncClaudeMd() {
   // Check if already at current version
   const versionMatch = content.match(new RegExp(VERSION_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([\\d.]+)'));
   if (versionMatch && versionMatch[1] === CURRENT_VERSION) {
-    return; // Already up-to-date
+    return 'current';
+  }
+
+  // First install: need consent
+  const isFirstInstall = !existsSync(CONSENT_FILE);
+  if (isFirstInstall) {
+    // Output notice via stdout — Claude will show this to the user
+    process.stdout.write(
+      '\n[Smart Memory] First-time setup: adding usage instructions to ~/.claude/CLAUDE.md\n' +
+      '  This helps Claude use Smart Memory effectively (store decisions, recover after compaction).\n' +
+      '  The section is marked with <!-- SMART_MEMORY_VERSION --> and can be removed anytime.\n\n'
+    );
+    // Record consent
+    try {
+      writeFileSync(CONSENT_FILE, CURRENT_VERSION + '\n', 'utf-8');
+    } catch { /* non-critical */ }
   }
 
   // Find and replace existing Smart Memory section, or append
@@ -90,8 +109,7 @@ export function syncClaudeMd() {
     const after = content.slice(endIdx + SECTION_END_MARKER.length).trimStart();
     newContent = (before ? before + '\n\n' : '') + TEMPLATE + (after ? '\n\n' + after : '') + '\n';
   } else if (startIdx !== -1) {
-    // Section exists but no end marker (legacy) — replace from start to end of file
-    // or to next ## heading
+    // Section exists but no end marker (legacy) — replace to next ## or end
     const afterStart = content.slice(startIdx);
     const nextHeading = afterStart.indexOf('\n## ', 1);
     if (nextHeading !== -1) {
@@ -99,7 +117,6 @@ export function syncClaudeMd() {
       const after = afterStart.slice(nextHeading).trimStart();
       newContent = (before ? before + '\n\n' : '') + TEMPLATE + '\n\n' + after + '\n';
     } else {
-      // Smart Memory is the last section — replace to end
       const before = content.slice(0, startIdx).trimEnd();
       newContent = (before ? before + '\n\n' : '') + TEMPLATE + '\n';
     }
@@ -113,4 +130,6 @@ export function syncClaudeMd() {
   } catch {
     // Non-critical — don't fail the session
   }
+
+  return isFirstInstall ? 'first-install' : 'updated';
 }

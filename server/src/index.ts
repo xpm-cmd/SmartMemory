@@ -12,6 +12,9 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { MemorySearch } from './memory/search.js';
 import type {
   MemoryStoreInput,
@@ -20,12 +23,16 @@ import type {
   MemoryDeleteInput,
 } from './types.js';
 
+// ── Version: single source of truth is plugin.json ───────────
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pluginJson = JSON.parse(readFileSync(resolve(__dirname, '../../.claude-plugin/plugin.json'), 'utf-8'));
+
 // ── Singleton ─────────────────────────────────────────────────
 
 const memorySearch = new MemorySearch();
 
 const server = new Server(
-  { name: 'smart-memory', version: '2.0.0' },
+  { name: 'smart-memory', version: pluginJson.version },
   { capabilities: { tools: {} } },
 );
 

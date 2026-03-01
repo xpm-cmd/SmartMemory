@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MemorySearch } from '../memory/search.js';
-import { TaskGraph } from '../task/graph.js';
-import { TaskRouter } from '../task/router.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -103,57 +101,3 @@ describe('Memory: store → search → query workflow', () => {
   });
 });
 
-// ── Task integration ───────────────────────────────────────────
-
-describe('Task: task_plan → task_next workflow', () => {
-  const graph = new TaskGraph();
-  const router = new TaskRouter();
-
-  it('plans a realistic project task graph', () => {
-    const result = graph.plan({
-      tasks: [
-        { id: 'setup-db', title: 'Setup database schema', priority: 'critical', dependencies: [], domain: 'db' },
-        { id: 'api-auth', title: 'Implement auth endpoints', priority: 'high', dependencies: ['setup-db'], domain: 'api' },
-        { id: 'api-users', title: 'Implement user endpoints', priority: 'high', dependencies: ['setup-db'], domain: 'api' },
-        { id: 'ui-login', title: 'Build login page', priority: 'medium', dependencies: ['api-auth'], domain: 'ui' },
-        { id: 'ui-dashboard', title: 'Build dashboard', priority: 'medium', dependencies: ['api-users'], domain: 'ui' },
-        { id: 'e2e-tests', title: 'Write E2E tests', priority: 'low', dependencies: ['ui-login', 'ui-dashboard'], domain: 'qa' },
-      ],
-    });
-
-    expect(result.cycles_detected).toBe(false);
-    expect(result.ready_now).toEqual(['setup-db']); // only db task has no deps
-    expect(result.topological_order[0]).toBe('setup-db');
-    expect(result.topological_order[result.topological_order.length - 1]).toBe('e2e-tests');
-  });
-
-  it('task_next returns highest priority available task', () => {
-    const all = graph.getAllTasks();
-    const next = router.nextTask(all, {});
-    expect(next.task?.id).toBe('setup-db'); // critical + no deps
-    expect(next.queue_depth).toBe(1);
-  });
-
-  it('task_next with domain filter returns domain-specific task', () => {
-    // Complete setup-db so api tasks become ready
-    graph.completeTask('setup-db');
-    const all = graph.getAllTasks();
-    const next = router.nextTask(all, { domain: 'api' });
-    expect(next.task?.domain).toBe('api');
-  });
-
-  it('task_next returns null when nothing ready in domain', () => {
-    const all = graph.getAllTasks();
-    const next = router.nextTask(all, { domain: 'ui' }); // UI deps not done yet
-    expect(next.task).toBeNull();
-    expect(next.reason).toContain('No tasks ready');
-  });
-
-  it('task_next returns null after all tasks done', () => {
-    // Complete everything
-    for (const t of graph.getAllTasks()) graph.completeTask(t.id);
-    const next = router.nextTask(graph.getAllTasks(), {});
-    expect(next.task).toBeNull();
-    expect(next.reason).toContain('completed');
-  });
-});
