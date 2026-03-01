@@ -49,7 +49,7 @@ function main() {
     const db = new DatabaseSync(DB_PATH, { readOnly: true });
     const now = Date.now();
 
-    // ── Export CONTEXT.md for cross-agent use ──
+    // ── Export AGENT-MEMORY-CONTEXT.md for cross-agent use ──
     exportContextMd(db, NAMESPACE, now);
 
     // ── Tiered loading for Claude Code context ──

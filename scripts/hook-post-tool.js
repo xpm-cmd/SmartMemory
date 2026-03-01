@@ -213,7 +213,7 @@ async function main() {
       }
     }
 
-    // Regenerate CONTEXT.md after commits so Codex/Gemini stay up-to-date
+    // Regenerate AGENT-MEMORY-CONTEXT.md after commits so Codex/Gemini stay up-to-date
     if (isGitCommit) {
       exportContextMd(db, NAMESPACE, now);
     }

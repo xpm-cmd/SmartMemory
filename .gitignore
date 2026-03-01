@@ -6,4 +6,4 @@ server/node_modules/
 index.bin
 .DS_Store
 *.js.map
-CONTEXT.md
+AGENT-MEMORY-CONTEXT.md

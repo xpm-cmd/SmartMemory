@@ -1,5 +1,5 @@
 /**
- * Smart Memory — Shared CONTEXT.md export + namespace helpers.
+ * Smart Memory — Shared AGENT-MEMORY-CONTEXT.md export + namespace helpers.
  * Used by both session-start and post-tool hooks.
  */
 
@@ -38,7 +38,7 @@ const EXPORT_TYPES = [
 ];
 
 /**
- * Export valuable memories to CONTEXT.md at the project root.
+ * Export valuable memories to AGENT-MEMORY-CONTEXT.md at the project root.
  * @param {object} db   Open DatabaseSync instance (read access sufficient)
  * @param {string} namespace  Project namespace
  * @param {number} now  Current timestamp (Date.now())
@@ -46,7 +46,7 @@ const EXPORT_TYPES = [
 export function exportContextMd(db, namespace, now) {
   const projectRoot = getProjectRoot();
   const projectName = basename(projectRoot);
-  const contextPath = join(projectRoot, 'CONTEXT.md');
+  const contextPath = join(projectRoot, 'AGENT-MEMORY-CONTEXT.md');
 
   // Query each type with its own LIMIT (prevents unbounded growth)
   const valuable = [];

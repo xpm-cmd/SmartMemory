@@ -2,10 +2,10 @@
 
 ## Project Context (Smart Memory)
 
-Before starting any task, read `CONTEXT.md` in the repo root.
+Before starting any task, read `AGENT-MEMORY-CONTEXT.md` in the repo root.
 It contains architecture decisions, solutions, and project context
 from previous development sessions. It is auto-generated on every
-Claude Code session start.
+Claude Code session start and after each commit.
 
 ## Key Architecture
 
@@ -14,7 +14,7 @@ Claude Code session start.
 - **Embeddings**: `server/src/memory/embeddings.ts` — vector generation via Transformers.js
 - **Vector Index**: `server/src/memory/vector-index.ts` — brute-force cosine/dot product
 - **Database**: `server/src/memory/database.ts` — SQLite via node:sqlite (Node >= 22.5)
-- **Hooks**: `scripts/hook-session-start.js` (loads context + exports CONTEXT.md), `scripts/hook-post-tool.js` (auto-capture)
+- **Hooks**: `scripts/hook-session-start.js` (loads context + exports AGENT-MEMORY-CONTEXT.md), `scripts/hook-post-tool.js` (auto-capture)
 
 ## Conventions
 

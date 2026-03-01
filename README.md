@@ -1,6 +1,6 @@
 # Smart Memory
 
-Persistent semantic memory for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Decisions, solutions, and context survive across sessions. Auto-exports `CONTEXT.md` for cross-agent use (Codex, Gemini, etc.).
+Persistent semantic memory for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Decisions, solutions, and context survive across sessions. Auto-exports `AGENT-MEMORY-CONTEXT.md` for cross-agent use (Codex, Gemini, etc.).
 
 ## What it does
 
@@ -8,7 +8,7 @@ Persistent semantic memory for [Claude Code](https://docs.anthropic.com/en/docs/
 - **Searches** via FTS5 full-text + vector similarity (hybrid)
 - **Auto-captures** Bash/Read output with noise filtering and 48h TTL
 - **Loads context** at session start via tiered hooks (decisions first, noise last)
-- **Exports** `CONTEXT.md` automatically for non-MCP agents
+- **Exports** `AGENT-MEMORY-CONTEXT.md` automatically for non-MCP agents
 
 ## Installation
 
@@ -55,7 +55,7 @@ Configure hooks in `~/.claude/settings.json`:
 
 ## Hooks
 
-**SessionStart** — Loads recent memories into Claude Code context (tiered by priority) and writes `CONTEXT.md` to disk for cross-agent use.
+**SessionStart** — Loads recent memories into Claude Code context (tiered by priority) and writes `AGENT-MEMORY-CONTEXT.md` to disk for cross-agent use.
 
 **PostToolUse** — Auto-captures Bash/Read output (≥200 chars, noise-filtered, 48h TTL). Git commits are stored permanently.
 
@@ -82,7 +82,7 @@ server/src/
     └── schema.ts         DDL: tables, indexes, FTS5
 
 scripts/
-├── hook-session-start.js   SessionStart hook + CONTEXT.md export
+├── hook-session-start.js   SessionStart hook + AGENT-MEMORY-CONTEXT.md export
 └── hook-post-tool.js       PostToolUse auto-capture hook
 
 skills/
