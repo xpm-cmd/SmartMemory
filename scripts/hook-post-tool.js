@@ -84,6 +84,11 @@ async function main() {
   let memType = 'auto-capture';
   let memTags = [toolName.toLowerCase(), 'auto'];
   let isGitCommit = false;
+  let isHighValue = false; // survives compaction (no TTL)
+
+  // ── Patterns that indicate high-value output (errors, test results) ──
+  const ERROR_PATTERNS = /\b(FAIL|FAILED|Error:|TypeError:|SyntaxError|ReferenceError|BUILD FAILED|error TS\d|AssertionError|panic:|FATAL)\b/;
+  const SUCCESS_PATTERNS = /\b(passed|✓|Tests?:\s*\d+\s*passed|BUILD SUCCESS|Successfully compiled)\b/i;
 
   if (toolName === 'Bash' && toolInput.command) {
     const cmd = String(toolInput.command);
@@ -98,6 +103,18 @@ async function main() {
       memType = 'commit';
       memTags = ['git', 'commit', 'auto'];
       isGitCommit = true;
+    } else if (ERROR_PATTERNS.test(output)) {
+      // Test failures and build errors — critical for debugging after compaction
+      key = 'auto:error:' + cmd.slice(0, 50).replace(/\s+/g, '_');
+      memType = 'error';
+      memTags = ['error', 'auto'];
+      isHighValue = true;
+    } else if (/^(npm\s+test|npm\s+run\s+(build|test)|npx\s+jest|pytest|cargo\s+test|go\s+test)/.test(cmd) && SUCCESS_PATTERNS.test(output)) {
+      // Successful test/build — confirms working state
+      key = 'auto:build:' + cmd.slice(0, 50).replace(/\s+/g, '_');
+      memType = 'context';
+      memTags = ['build', 'success', 'auto'];
+      isHighValue = true;
     } else {
       key = 'auto:bash:' + cmd.slice(0, 60).replace(/\s+/g, '_');
     }
@@ -140,8 +157,8 @@ async function main() {
     // Truncate extremely long outputs before chunking
     const content = output.length > MAX_TOTAL ? output.slice(0, MAX_TOTAL) : output;
 
-    // Git commits are permanent history — no TTL. Auto-captures expire in 48h.
-    const expiresAt = isGitCommit ? null : now + AUTO_TTL_MS;
+    // Commits, errors, and build results are permanent — no TTL. Auto-captures expire in 48h.
+    const expiresAt = (isGitCommit || isHighValue) ? null : now + AUTO_TTL_MS;
     const upsertSql =
       'INSERT INTO memories (id, key, content, namespace, type, tags, embedding_dims, created_at, updated_at, expires_at, metadata) ' +
       'VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?) ' +
