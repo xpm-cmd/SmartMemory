@@ -78,7 +78,7 @@ Add hooks to `~/.claude/settings.json`:
 ### Automatic (no action needed)
 
 - **SessionStart hook** loads recent memories into the agent's context, prioritized by type (session snapshot > decisions > solutions > context > auto-captures)
-- **PostToolUse hook** captures Bash/Read outputs (>= 200 chars) with noise filtering and 48h TTL. Errors and build results are auto-promoted to permanent storage. Git commits are stored permanently.
+- **PostToolUse hook** captures Bash/Read outputs (>= 200 chars) with noise filtering and 7-day TTL. Errors and build results are auto-promoted to permanent storage. Git commits are stored permanently.
 - **CLAUDE.md sync** adds usage instructions to `~/.claude/CLAUDE.md` on first use (versioned, auto-updates)
 - **Cross-agent export** writes `AGENT-MEMORY-CONTEXT.md` to your project root on every session start and after each commit
 
