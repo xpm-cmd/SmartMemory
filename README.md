@@ -1,14 +1,16 @@
 # Smart Memory
 
-Persistent semantic memory for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Decisions, solutions, and context survive across sessions — no setup required beyond install.
+Persistent semantic memory for AI coding agents. Decisions, solutions, and context survive across sessions — works with Claude Code, Codex, Calwbot, Hermes, or any agent.
 
 ## Why
 
-Claude Code starts every session with a blank slate. Smart Memory fixes that:
+AI agents start every session with a blank slate. Smart Memory fixes that:
 
 - **Remembers** architecture decisions, bug fixes, patterns, and project context
 - **Auto-captures** command output and file reads with intelligent noise filtering
-- **Loads context** at session start so Claude picks up where it left off
+- **Hybrid search** — BM25 lexical + vector semantic search with score blending
+- **Context management** — token-budgeted context generation and session snapshots
+- **CLI** — `smart-memory-cli` for terminal access, scripting, and non-MCP agents
 - **Exports** `AGENT-MEMORY-CONTEXT.md` for agents without MCP access (Codex, Gemini, Copilot)
 
 ## Quick Start
@@ -75,21 +77,52 @@ Add hooks to `~/.claude/settings.json`:
 
 ### Automatic (no action needed)
 
-- **SessionStart hook** loads recent memories into Claude's context at the start of every session, prioritized by type (decisions > solutions > context > auto-captures)
+- **SessionStart hook** loads recent memories into the agent's context, prioritized by type (session snapshot > decisions > solutions > context > auto-captures)
 - **PostToolUse hook** captures Bash/Read outputs (>= 200 chars) with noise filtering and 48h TTL. Errors and build results are auto-promoted to permanent storage. Git commits are stored permanently.
 - **CLAUDE.md sync** adds usage instructions to `~/.claude/CLAUDE.md` on first use (versioned, auto-updates)
 - **Cross-agent export** writes `AGENT-MEMORY-CONTEXT.md` to your project root on every session start and after each commit
 
-### Manual (Claude uses these as needed)
+### MCP Tools (8 tools)
 
 | Tool | Purpose |
 |---|---|
 | `memory_store` | Save content with auto-embedding. Upserts by key. |
-| `memory_search` | Semantic similarity + FTS5 keyword hybrid search |
+| `memory_search` | Hybrid BM25 + vector semantic search |
 | `memory_query` | Filter by type, tags, date range |
 | `memory_stats` | Total count, type breakdown, embedding coverage |
 | `memory_delete` | Remove a memory by key |
 | `memory_compact` | Generate embeddings for auto-captures, clean expired |
+| `memory_context` | Token-budgeted context generation with relevance hints |
+| `memory_snapshot` | Save/load session state across sessions |
+
+### CLI
+
+All operations are also available from the terminal via `smart-memory-cli`:
+
+```bash
+# Search memories
+smart-memory-cli search "authentication strategy" --limit 5
+
+# Store a memory
+smart-memory-cli store "decision:auth" "Chose JWT over sessions" --type decision --tags auth,jwt
+
+# Token-budgeted context
+smart-memory-cli context --budget 4000 --hint "working on auth refactor"
+
+# Save session state
+smart-memory-cli snapshot save --summary "refactoring auth module" --pending "fix JWT,add tests"
+
+# Load session state
+smart-memory-cli snapshot load
+
+# Query, stats, delete, compact
+smart-memory-cli query --type decision
+smart-memory-cli stats
+smart-memory-cli delete "old-key"
+smart-memory-cli compact
+```
+
+All commands support `--json` for machine-readable output and `--namespace` for cross-project access.
 
 ### Memory Types
 
@@ -100,11 +133,30 @@ memory_store key="context:api-design"      type="context"   content="The API fol
 memory_store key="pattern:error-handling"   type="pattern"   content="All services use Result<T> pattern..."
 ```
 
+### Context Management
+
+**Recover after context compression:**
+```
+memory_context hint="what you were working on" budget_tokens=4000
+```
+Returns a token-budgeted markdown summary with the most relevant memories. Prioritizes hint matches, then decisions/solutions, then context/patterns.
+
+**Save session state before ending:**
+```
+memory_snapshot action="save" summary="refactoring auth module" pending=["fix JWT", "add tests"]
+```
+Next session auto-loads the snapshot and uses it as a relevance hint for context loading.
+
+**Load session state anytime:**
+```
+memory_snapshot action="load"
+```
+
 ## Features
 
 ### Hybrid Search
 
-Combines FTS5 full-text search with vector similarity (Transformers.js embeddings, local — no API calls). Results are ranked by a weighted combination of both signals.
+Combines BM25 scoring (FTS5 full-text with column weights) and vector cosine similarity (Transformers.js MiniLM-L6-v2 embeddings, local — no API calls). Results are blended with configurable alpha, single-source penalties, and multiplicative recency boost. FTS5 queries are sanitized with stop-word filtering and CamelCase expansion.
 
 ### Noise Filtering
 
@@ -112,7 +164,7 @@ The PostToolUse hook skips noisy commands (`ls`, `pwd`, `git status`, `npm insta
 
 ### Cross-Agent Context
 
-`AGENT-MEMORY-CONTEXT.md` is auto-generated at your project root with the most valuable memories (limited to ~60 entries across 4 categories). Agents that don't support MCP — like Codex, Gemini, or Copilot — can read this file via `AGENTS.md` instructions.
+`AGENT-MEMORY-CONTEXT.md` is auto-generated at your project root with the most valuable memories (limited to ~60 entries across 4 categories). Includes session snapshot state when available. Agents that don't support MCP — like Codex, Gemini, or Copilot — can read this file via `AGENTS.md` instructions.
 
 ### Worktree Support
 
@@ -126,17 +178,18 @@ The `/memory-manage` skill delegates mechanical memory operations (search, compa
 
 ```
 server/src/
-├── index.ts              MCP server entry point (6 tools)
+├── index.ts              MCP server entry point (8 tools)
+├── cli.ts                CLI entry point (smart-memory-cli)
 ├── types.ts              Shared TypeScript types
 └── memory/
-    ├── search.ts         Orchestrator: store, search, query, compact
+    ├── search.ts         Orchestrator: store, search, query, context, snapshot, compact
     ├── database.ts       node:sqlite wrapper (WAL mode)
-    ├── embeddings.ts     Transformers.js local embeddings
-    ├── vector-index.ts   Brute-force vector search (dot product)
+    ├── embeddings.ts     Transformers.js local embeddings (MiniLM-L6-v2)
+    ├── vector-index.ts   Legacy vector index (migration only)
     └── schema.ts         DDL: tables, indexes, FTS5
 
 scripts/
-├── hook-session-start.js   SessionStart hook + context export
+├── hook-session-start.js   SessionStart hook + snapshot-aware context loading
 ├── hook-post-tool.js       PostToolUse auto-capture hook
 ├── lib/
 │   ├── export-context.js   AGENT-MEMORY-CONTEXT.md generator
@@ -152,8 +205,7 @@ skills/
 ## Storage
 
 All data lives locally in `~/.smart-memory/{namespace}/`:
-- `memory.db` — SQLite database (WAL mode, FTS5)
-- `index.bin` — Serialized vector index
+- `memory.db` — SQLite database (WAL mode, FTS5, embeddings as BLOBs)
 
 No cloud APIs. No external dependencies beyond npm packages. Everything runs on your machine.
 
@@ -161,8 +213,8 @@ No cloud APIs. No external dependencies beyond npm packages. Everything runs on 
 
 ```bash
 cd server && npm install && npm run build   # Build
-cd server && npm test                        # Run server tests (Vitest)
-node --test scripts/tests/hook-patterns.test.js  # Run hook pattern tests
+cd server && npm test                        # Run server tests (Vitest, 24 tests)
+node --test scripts/tests/hook-patterns.test.js  # Run hook pattern tests (89 tests)
 ```
 
 ## Uninstall
