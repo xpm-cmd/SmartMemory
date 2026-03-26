@@ -1,6 +1,6 @@
 # Smart Memory
 
-Persistent semantic memory for AI coding agents. Decisions, solutions, and context survive across sessions — works with Claude Code, Codex, Calwbot, Hermes, or any agent.
+Persistent semantic memory for AI coding agents. Decisions, solutions, and context survive across sessions.
 
 ## Why
 
