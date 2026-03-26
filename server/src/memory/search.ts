@@ -21,6 +21,10 @@ import type {
   MemoryQueryInput,
   MemorySearchResult,
   MemoryStats,
+  MemoryContextInput,
+  MemoryContextResult,
+  MemorySnapshotInput,
+  MemorySnapshotResult,
   SearchConfig,
   SearchDebugInfo,
 } from '../types.js';
@@ -538,6 +542,162 @@ export class MemorySearch {
       expired_cleaned: expiredBefore.length,
       total_after: total,
     };
+  }
+
+  // ── Context (token-budgeted) ─────────────────────────────
+
+  async context(input: MemoryContextInput): Promise<MemoryContextResult> {
+    await this.init();
+    this.cleanExpired();
+
+    const budget = Math.max(500, Math.min(32000, input.budget_tokens ?? 4000));
+    const hint = input.hint?.trim().slice(0, 500) || undefined;
+    const ns = input.namespace ?? this.namespace;
+    const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+    const includedIds = new Set<string>();
+    const sections: Array<{ key: string; type: string; content: string }> = [];
+    let usedTokens = 0;
+
+    // Helper: add a memory if it fits the budget
+    const tryAdd = (id: string, key: string, type: string, content: string): boolean => {
+      if (includedIds.has(id)) return false;
+      // Estimate tokens for this entry: "### key\n*type*\ncontent\n\n"
+      const entry = `### ${key}\n*${type}*\n${content}\n`;
+      const entryTokens = estimateTokens(entry);
+      if (usedTokens + entryTokens > budget) {
+        // Try truncating content to fit remaining budget
+        const remainingTokens = budget - usedTokens;
+        const headerTokens = estimateTokens(`### ${key}\n*${type}*\n`);
+        const availableContentTokens = remainingTokens - headerTokens - 2; // 2 for newlines
+        if (availableContentTokens < 20) return false; // not worth truncating
+        const truncatedContent = content.slice(0, availableContentTokens * 4);
+        const truncatedEntry = `### ${key}\n*${type}*\n${truncatedContent}…\n`;
+        sections.push({ key, type, content: truncatedContent + '…' });
+        usedTokens += estimateTokens(truncatedEntry);
+        includedIds.add(id);
+        return true;
+      }
+      sections.push({ key, type, content });
+      usedTokens += entryTokens;
+      includedIds.add(id);
+      return true;
+    };
+
+    // 1. If hint provided: hybrid search for relevant memories
+    if (hint) {
+      const hintResults = await this.search({
+        query: hint,
+        namespace: ns,
+        limit: 20,
+        min_similarity: 0.4,
+      });
+      for (const r of hintResults) {
+        if (usedTokens >= budget) break;
+        tryAdd(r.id, r.key, r.type, r.content);
+      }
+    }
+
+    // 2. Always include recent decisions & solutions
+    for (const type of ['decision', 'solution']) {
+      const results = await this.query({ type, namespace: ns, limit: 10 });
+      for (const r of results) {
+        if (usedTokens >= budget) break;
+        tryAdd(r.id, r.key, r.type, r.content);
+      }
+    }
+
+    // 3. Fill remaining budget with context & patterns
+    for (const type of ['context', 'pattern']) {
+      const results = await this.query({ type, namespace: ns, limit: 10 });
+      for (const r of results) {
+        if (usedTokens >= budget) break;
+        tryAdd(r.id, r.key, r.type, r.content);
+      }
+    }
+
+    // Build output markdown
+    const contextStr = sections.map(s => `### ${s.key}\n*${s.type}*\n${s.content}`).join('\n\n');
+
+    return {
+      context: contextStr,
+      memories_included: sections.length,
+      tokens_used: usedTokens,
+    };
+  }
+
+  // ── Snapshot (save/load session state) ─────────────────────
+
+  async snapshot(input: MemorySnapshotInput): Promise<MemorySnapshotResult> {
+    await this.init();
+
+    const ns = input.namespace ?? this.namespace;
+
+    if (input.action === 'save') {
+      const summary = (input.summary ?? '').trim().slice(0, 1000);
+      if (!summary) throw new Error('summary is required for snapshot save');
+
+      // Validate and sanitize pending items
+      let pending: string[] = [];
+      if (Array.isArray(input.pending)) {
+        pending = input.pending
+          .slice(0, 20)
+          .map(item => String(item).trim().slice(0, 200))
+          .filter(item => item.length > 0);
+      }
+
+      // Build content
+      const contentLines = ['## Session State', '', '### Working On', summary];
+      if (pending.length > 0) {
+        contentLines.push('', '### Pending');
+        for (const item of pending) {
+          contentLines.push(`- ${item}`);
+        }
+      }
+      const content = contentLines.join('\n');
+
+      await this.store({
+        key: 'session-snapshot',
+        content,
+        namespace: ns,
+        type: 'snapshot',
+        tags: ['session', 'snapshot'],
+      });
+
+      return { saved: true, key: 'session-snapshot' };
+    }
+
+    if (input.action === 'load') {
+      const row = this.db.get<{ content: string; updated_at: number }>(
+        'SELECT content, updated_at FROM memories WHERE key = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)',
+        ['session-snapshot', ns, Date.now()],
+      );
+
+      if (!row) return { empty: true };
+
+      // Parse content back to structured form
+      const content = row.content;
+      let summary = '';
+      const pending: string[] = [];
+
+      const workingOnMatch = content.match(/### Working On\n([\s\S]*?)(?=\n### |\n## |$)/);
+      if (workingOnMatch) {
+        summary = workingOnMatch[1].trim();
+      }
+
+      const pendingMatch = content.match(/### Pending\n([\s\S]*?)(?=\n### |\n## |$)/);
+      if (pendingMatch) {
+        const lines = pendingMatch[1].trim().split('\n');
+        for (const line of lines) {
+          const item = line.replace(/^- /, '').trim();
+          if (item) pending.push(item);
+        }
+      }
+
+      return { summary, pending, saved_at: row.updated_at };
+    }
+
+    throw new Error(`Invalid action: "${input.action}". Must be "save" or "load".`);
   }
 
   close(): void {

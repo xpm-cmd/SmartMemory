@@ -118,6 +118,32 @@ export interface SearchDebugInfo {
   config: SearchConfig;
 }
 
+// ── Context & Snapshot ────────────────────────────────────────
+
+export interface MemoryContextInput {
+  budget_tokens?: number;   // default 4000, clamped [500, 32000]
+  hint?: string;            // relevance hint, max 500 chars
+  namespace?: string;
+}
+
+export interface MemoryContextResult {
+  context: string;          // formatted markdown
+  memories_included: number;
+  tokens_used: number;      // approximate (~4 chars per token)
+}
+
+export interface MemorySnapshotInput {
+  action: 'save' | 'load';
+  summary?: string;         // max 1000 chars (save only)
+  pending?: string[];       // max 20 items, each max 200 chars (save only)
+  namespace?: string;
+}
+
+export type MemorySnapshotResult =
+  | { saved: true; key: string }
+  | { summary: string; pending: string[]; saved_at: number }
+  | { empty: true };
+
 // ── Embeddings ────────────────────────────────────────────────
 
 export interface EmbeddingProvider {

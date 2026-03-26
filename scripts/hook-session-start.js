@@ -52,9 +52,43 @@ function main() {
     // ── Export AGENT-MEMORY-CONTEXT.md for cross-agent use ──
     exportContextMd(db, NAMESPACE, now);
 
+    // ── Check for session snapshot (relevance hint) ──
+    let snapshotSummary = null;
+    try {
+      const snapshotRow = db.prepare(
+        'SELECT content, updated_at FROM memories WHERE key = ? AND namespace = ? AND (expires_at IS NULL OR expires_at > ?)'
+      ).get('session-snapshot', NAMESPACE, now);
+      if (snapshotRow) {
+        const match = String(snapshotRow.content).match(/### Working On\n([\s\S]*?)(?=\n### |\n## |$)/);
+        if (match) snapshotSummary = match[1].trim();
+      }
+    } catch { /* silent */ }
+
     // ── Tiered loading for Claude Code context ──
     const lines = [];
     let totalLoaded = 0;
+
+    // If snapshot exists, show session state first
+    if (snapshotSummary) {
+      lines.push('── Session Snapshot ──');
+      lines.push('• Last session: ' + truncate(snapshotSummary, 300));
+      // Parse pending items if present
+      try {
+        const snapshotRow = db.prepare(
+          'SELECT content FROM memories WHERE key = ? AND namespace = ?'
+        ).get('session-snapshot', NAMESPACE);
+        if (snapshotRow) {
+          const pendingMatch = String(snapshotRow.content).match(/### Pending\n([\s\S]*?)(?=\n### |\n## |$)/);
+          if (pendingMatch) {
+            const pendingLines = pendingMatch[1].trim().split('\n').filter(l => l.startsWith('- '));
+            if (pendingLines.length > 0) {
+              lines.push('  Pending: ' + pendingLines.map(l => l.replace(/^- /, '')).join(', '));
+            }
+          }
+        }
+      } catch { /* silent */ }
+      lines.push('');
+    }
 
     for (const tier of TIERS) {
       const placeholders = tier.types.map(() => '?').join(', ');

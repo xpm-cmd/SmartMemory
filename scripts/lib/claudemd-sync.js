@@ -23,7 +23,7 @@ const TEMPLATE = `## Smart Memory
 
 ${VERSION_MARKER}${CURRENT_VERSION} -->
 
-6 tools: \`memory_store\`, \`memory_search\`, \`memory_query\`, \`memory_stats\`, \`memory_delete\`, \`memory_compact\`
+8 tools: \`memory_store\`, \`memory_search\`, \`memory_query\`, \`memory_stats\`, \`memory_delete\`, \`memory_compact\`, \`memory_context\`, \`memory_snapshot\`
 
 ### Search before acting
 
@@ -64,6 +64,22 @@ When you see compressed/summarized prior messages, recover details:
 1. \`memory_search query="[current task topic]"\` — find relevant memories
 2. \`memory_query type="decision"\` — reload architectural decisions
 3. Re-read critical files before editing (compaction loses exact content)
+
+### Context management
+
+**Recovering after context compression:**
+When your context is compressed and you lose details, call:
+\`memory_context hint="<what you were working on>" budget_tokens=4000\`
+This returns a token-budgeted markdown summary of your most relevant memories.
+
+**Saving session state:**
+Before ending a session or when context is getting large, save your state:
+\`memory_snapshot action="save" summary="<what I'm working on>" pending=["task1", "task2"]\`
+Next session will auto-load this snapshot.
+
+**Loading session state:**
+At any point, recover your last session state:
+\`memory_snapshot action="load"\`
 
 ### Trust rules
 

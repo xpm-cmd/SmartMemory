@@ -21,6 +21,8 @@ import type {
   MemorySearchInput,
   MemoryQueryInput,
   MemoryDeleteInput,
+  MemoryContextInput,
+  MemorySnapshotInput,
 } from './types.js';
 
 // ── Version: single source of truth is plugin.json ───────────
@@ -111,6 +113,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
       },
     },
+    {
+      name: 'memory_context',
+      description: 'Token-budgeted context generation. Returns the most relevant memories as formatted markdown, respecting a token budget. Use after context compression or to quickly load relevant context.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          budget_tokens: { type: 'number', description: 'Max tokens to use (default: 4000, min: 500, max: 32000)' },
+          hint:          { type: 'string', description: 'Relevance hint — what you are working on (max 500 chars)' },
+          namespace:     { type: 'string', description: 'Namespace (defaults to current project)' },
+        },
+      },
+    },
+    {
+      name: 'memory_snapshot',
+      description: 'Save or load session state. Save before ending a session or when context is large. Next session auto-loads the snapshot.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action:  { type: 'string', enum: ['save', 'load'], description: 'save or load' },
+          summary: { type: 'string', description: 'What you were working on (save only, max 1000 chars)' },
+          pending: { type: 'array', items: { type: 'string' }, description: 'Pending tasks/decisions (save only, max 20 items)' },
+          namespace: { type: 'string', description: 'Namespace (defaults to current project)' },
+        },
+        required: ['action'],
+      },
+    },
   ],
 }));
 
@@ -150,6 +178,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const ns = (args as { namespace?: string }).namespace;
         const result = await memorySearch.compact(ns);
         return { content: [{ type: 'text', text: JSON.stringify({ success: true, ...result, message: `Compacted: ${result.embedded} embeddings generated, ${result.expired_cleaned} expired cleaned, ${result.total_after} total remaining` }, null, 2) }] };
+      }
+      case 'memory_context': {
+        const input = args as unknown as MemoryContextInput;
+        const result = await memorySearch.context(input);
+        return { content: [{ type: 'text', text: JSON.stringify({ memories_included: result.memories_included, tokens_used: result.tokens_used, context: result.context }, null, 2) }] };
+      }
+      case 'memory_snapshot': {
+        const input = args as unknown as MemorySnapshotInput;
+        if (!input.action || !['save', 'load'].includes(input.action)) {
+          throw new Error('action must be "save" or "load"');
+        }
+        const result = await memorySearch.snapshot(input);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
       default:
         throw new Error(`Unknown tool: ${name}`);

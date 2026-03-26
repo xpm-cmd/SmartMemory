@@ -42,6 +42,19 @@ Usage:
 
   smart-memory-cli compact                  Clean expired + generate embeddings
     --namespace NS                          Override namespace
+
+  smart-memory-cli context                  Token-budgeted context generation
+    --budget N                              Max tokens (default: 4000)
+    --hint "query"                          Relevance hint
+    --namespace NS                          Override namespace
+
+  smart-memory-cli snapshot save            Save session state
+    --summary "what I'm working on"         Session summary (required)
+    --pending "task1,task2"                 Pending tasks (comma-separated)
+    --namespace NS                          Override namespace
+
+  smart-memory-cli snapshot load            Load last session state
+    --namespace NS                          Override namespace
 `;
 
 // ── Argument parsing ──────────────────────────────────────────
@@ -240,6 +253,73 @@ async function cmdCompact(memory: MemorySearch, _positional: string[], flags: Re
   process.stdout.write(`Compacted: ${result.embedded} embeddings generated, ${result.expired_cleaned} expired cleaned, ${result.total_after} total remaining\n`);
 }
 
+async function cmdContext(memory: MemorySearch, _positional: string[], flags: Record<string, string>): Promise<void> {
+  const result = await memory.context({
+    budget_tokens: flags.budget ? parseInt(flags.budget, 10) : undefined,
+    hint: flags.hint,
+    namespace: flags.namespace,
+  });
+
+  if (flags.json === 'true') {
+    printJson(result);
+    return;
+  }
+
+  process.stdout.write(`Context: ${result.memories_included} memories, ~${result.tokens_used} tokens\n\n`);
+  if (result.context) {
+    process.stdout.write(result.context + '\n');
+  } else {
+    process.stdout.write('No memories found.\n');
+  }
+}
+
+async function cmdSnapshot(memory: MemorySearch, positional: string[], flags: Record<string, string>): Promise<void> {
+  const action = positional[0];
+  if (!action || !['save', 'load'].includes(action)) {
+    process.stderr.write('Error: snapshot requires action "save" or "load"\n');
+    process.exit(1);
+  }
+
+  if (action === 'save') {
+    if (!flags.summary) {
+      process.stderr.write('Error: snapshot save requires --summary\n');
+      process.exit(1);
+    }
+    const result = await memory.snapshot({
+      action: 'save',
+      summary: flags.summary,
+      pending: flags.pending ? flags.pending.split(',').map(t => t.trim()) : undefined,
+      namespace: flags.namespace,
+    });
+    if (flags.json === 'true') {
+      printJson(result);
+    } else {
+      process.stdout.write(`Snapshot saved.\n`);
+    }
+  } else {
+    const result = await memory.snapshot({
+      action: 'load',
+      namespace: flags.namespace,
+    });
+    if (flags.json === 'true') {
+      printJson(result);
+      return;
+    }
+    if ('empty' in result) {
+      process.stdout.write('No snapshot found.\n');
+    } else if ('summary' in result) {
+      process.stdout.write(`Session State (saved ${formatDate(result.saved_at)})\n\n`);
+      process.stdout.write(`Working on: ${result.summary}\n`);
+      if (result.pending.length > 0) {
+        process.stdout.write(`\nPending:\n`);
+        for (const item of result.pending) {
+          process.stdout.write(`  - ${item}\n`);
+        }
+      }
+    }
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -272,6 +352,12 @@ async function main(): Promise<void> {
         break;
       case 'compact':
         await cmdCompact(memory, positional, flags);
+        break;
+      case 'context':
+        await cmdContext(memory, positional, flags);
+        break;
+      case 'snapshot':
+        await cmdSnapshot(memory, positional, flags);
         break;
       default:
         process.stderr.write(`Unknown command: ${command}\n\n`);
