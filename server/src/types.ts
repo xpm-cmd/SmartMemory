@@ -70,6 +70,54 @@ export interface MemoryStats {
   embedding_coverage: number; // 0-1 fraction that have embeddings
 }
 
+// ── Search Configuration ─────────────────────────────────────
+
+export interface SearchConfig {
+  /** Weight of vector score vs BM25 score (0 = BM25 only, 1 = vector only, 0.5 = equal) */
+  blendAlpha: number;
+  /** BM25 column weights for FTS5 */
+  bm25Weights: {
+    key: number;
+    content: number;
+  };
+  /** Penalty multipliers for single-source results */
+  penalties: {
+    fts5Only: number;
+    vectorOnly: number;
+  };
+  /** Minimum score thresholds */
+  thresholds: {
+    relevance: number;
+  };
+  /** Max terms before switching from AND to OR in FTS5 queries */
+  andQueryTermCount: number;
+}
+
+export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
+  blendAlpha: 0.5,
+  bm25Weights: {
+    key: 3.0,
+    content: 1.0,
+  },
+  penalties: {
+    fts5Only: 0.8,
+    vectorOnly: 0.8,
+  },
+  thresholds: {
+    relevance: 0.3,
+  },
+  andQueryTermCount: 3,
+};
+
+// ── Search Debug Types ───────────────────────────────────────
+
+export interface SearchDebugInfo {
+  fts5Results: Array<{ id: string; key: string; score: number }>;
+  vectorResults: Array<{ id: string; key: string; score: number }>;
+  mergedResults: Array<{ id: string; key: string; score: number; source: 'fts5' | 'vector' | 'hybrid' }>;
+  config: SearchConfig;
+}
+
 // ── Embeddings ────────────────────────────────────────────────
 
 export interface EmbeddingProvider {
