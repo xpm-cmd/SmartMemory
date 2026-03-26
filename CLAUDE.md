@@ -36,7 +36,7 @@ Smart Memory is a Claude Code plugin that provides persistent semantic memory ac
 
 - PostToolUse captures Bash/Read output >= 200 chars
 - Noise filtered: `ls`, `pwd`, `git status`, `npm install`, etc. are skipped
-- TTL: 48h for regular auto-captures, permanent for errors and git commits
+- TTL: 7 days for regular auto-captures, permanent for errors and git commits
 - Error detection: 3 tiers (typed exceptions > stack traces > exit codes)
 - Errors and build results are auto-promoted to permanent (no TTL)
 

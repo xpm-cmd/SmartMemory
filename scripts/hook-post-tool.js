@@ -22,7 +22,7 @@ const MIN_LEN = 200;       // raised from 100 — skip trivial outputs
 const MAX_CHUNK = 3000;   // max chars per stored chunk
 const MAX_CHUNKS = 5;     // max chunks per output (5 × 3000 = 15K)
 const MAX_TOTAL = 15000;  // hard cap — truncate beyond this
-const AUTO_TTL_MS = 48 * 3_600_000; // 48h expiry for auto-captures
+const AUTO_TTL_MS = 168 * 3_600_000; // 7 days expiry for auto-captures
 
 // ── Noise filtering — skip trivial commands with no useful context ──
 const NOISE_COMMANDS = [
@@ -169,7 +169,7 @@ async function main() {
     // Truncate extremely long outputs before chunking
     const content = output.length > MAX_TOTAL ? output.slice(0, MAX_TOTAL) : output;
 
-    // Commits, errors, and build results are permanent — no TTL. Auto-captures expire in 48h.
+    // Commits, errors, and build results are permanent — no TTL. Auto-captures expire in 7 days.
     const expiresAt = (isGitCommit || isHighValue) ? null : now + AUTO_TTL_MS;
     const upsertSql =
       'INSERT INTO memories (id, key, content, namespace, type, tags, embedding_dims, created_at, updated_at, expires_at, metadata) ' +

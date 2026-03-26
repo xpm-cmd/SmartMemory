@@ -56,7 +56,7 @@ memory_store key="pattern:[name]"    type="pattern"    # recurring patterns disc
 - Read multiple files and connect the dots about a system's behavior
 - Gain understanding through research that would be lost after compaction
 
-Bash/Read outputs ≥ 200 chars are auto-saved (48h TTL). Errors and test results are auto-promoted to permanent.
+Bash/Read outputs ≥ 200 chars are auto-saved (7-day TTL). Errors and test results are auto-promoted to permanent.
 
 ### After context compaction
 
