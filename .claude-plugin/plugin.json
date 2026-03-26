@@ -1,10 +1,10 @@
 {
   "name": "smart-memory",
-  "version": "2.2.0",
-  "description": "Persistent semantic memory for Claude Code. 6 MCP tools, 2 hooks, 1 skill. FTS5 + vector hybrid search, cross-agent context export.",
+  "version": "3.0.0",
+  "description": "Persistent semantic memory for AI coding agents. 8 MCP tools, CLI, hybrid search (BM25 + vector), context management, cross-agent export.",
   "author": {
     "name": "xpm-cmd"
   },
   "license": "MIT",
-  "keywords": ["memory", "embeddings", "semantic-search", "sqlite", "hooks", "mcp"]
+  "keywords": ["memory", "embeddings", "semantic-search", "sqlite", "hooks", "mcp", "cli", "bm25", "context-management", "ai-agents"]
 }

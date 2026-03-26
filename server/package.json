@@ -1,7 +1,7 @@
 {
   "name": "smart-memory-mcp",
-  "version": "1.0.0",
-  "description": "MCP Server for persistent semantic memory in Claude Code",
+  "version": "3.0.0",
+  "description": "MCP Server for persistent semantic memory — hybrid search, context management, CLI",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
