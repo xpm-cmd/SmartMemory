@@ -74,6 +74,20 @@ export function exportContextMd(db, namespace, now) {
   mdLines.push('> Namespace: `' + namespace + '` | Total memories: ' + Number(statsRow?.total ?? 0));
   mdLines.push('> This file is for agents (Codex, Gemini, etc.) that don\'t have MCP access.\n');
 
+  // Include session snapshot at the top if it exists
+  try {
+    const snapshotRow = db.prepare(
+      'SELECT content, updated_at FROM memories WHERE key = ? AND namespace = ? AND type = ? AND (expires_at IS NULL OR expires_at > ?)'
+    ).get('session-snapshot', namespace, 'snapshot', now);
+    if (snapshotRow) {
+      const snapshotDate = new Date(Number(snapshotRow.updated_at)).toLocaleDateString();
+      mdLines.push('## Session State\n');
+      mdLines.push('*Last saved: ' + snapshotDate + '*\n');
+      mdLines.push(String(snapshotRow.content));
+      mdLines.push('');
+    }
+  } catch { /* silent */ }
+
   for (const section of EXPORT_TYPES) {
     const rows = valuable.filter(r => r.type === section.type);
     if (rows.length === 0) continue;

@@ -108,7 +108,8 @@ export class EmbeddingManager {
   private neuralReady = false;
 
   constructor() {
-    if (process.env.SMART_MEMORY_NEURAL === '1') {
+    // Neural embeddings enabled by default; set SMART_MEMORY_NO_NEURAL=1 to disable
+    if (process.env.SMART_MEMORY_NO_NEURAL !== '1') {
       this.neural = new TransformersEmbeddingProvider();
       // Warm up in background — failures are ignored
       this.neural.init().then(() => {
